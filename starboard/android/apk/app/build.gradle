@@ -110,7 +110,6 @@ android {
             }
             signingConfig signingConfigs.debugConfig
             enableUnitTestCoverage true
-            testCoverageEnabled true
         }
         devel {
             debuggable true
