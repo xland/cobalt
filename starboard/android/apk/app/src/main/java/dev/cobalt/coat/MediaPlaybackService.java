@@ -41,13 +41,11 @@ public class MediaPlaybackService extends Service {
 
   @Override
   public void onCreate() {
-    if (getStarboardBridge() == null) {
-      Log.e(TAG, "StarboardBridge already destroyed.");
-      return;
-    }
     Log.i(TAG, "Creating a Media playback foreground service.");
     super.onCreate();
-    getStarboardBridge().onServiceStart(this);
+    if (getStarboardBridge() != null) {
+      getStarboardBridge().onServiceStart(this);
+    }
     this.notificationManager =
         (NotificationManager) this.getSystemService(Context.NOTIFICATION_SERVICE);
     this.channelCreated = createNotificationChannel();
@@ -69,17 +67,15 @@ public class MediaPlaybackService extends Service {
 
   @Override
   public void onDestroy() {
-    if (getStarboardBridge() == null) {
-      Log.e(TAG, "StarboardBridge already destroyed.");
-      return;
-    }
     Log.i(TAG, "Destroying the Media playback service.");
 
     if (VERSION.SDK_INT >= 26 && this.channelCreated) {
       this.notificationManager.deleteNotificationChannel(NOTIFICATION_CHANNEL_ID);
     }
 
-    getStarboardBridge().onServiceDestroy(this);
+    if (getStarboardBridge() != null) {
+      getStarboardBridge().onServiceDestroy(this);
+    }
     super.onDestroy();
   }
 
