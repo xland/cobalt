@@ -17,6 +17,7 @@
 
 #include <fcntl.h>
 #include <pthread.h>
+#include <string.h>
 #include <unistd.h>
 #include "starboard/nplb/posix_compliance/posix_socket_helpers.h"
 #include "starboard/thread.h"
@@ -76,8 +77,14 @@ TEST(PosixSocketSendTest, RainyDayUnconnectedSocket) {
   ssize_t bytes_written = send(socket_fd, buf, sizeof(buf), kSendFlags);
   EXPECT_FALSE(bytes_written >= 0);
 
+<<<<<<< HEAD
   // TODO: check errno: EXPECT_TRUE(errno == ECONNRESET || errno == ENETRESET ||
   // errno == EPIPE);
+=======
+  EXPECT_TRUE(errno == ECONNRESET || errno == ENETRESET || errno == EPIPE ||
+              errno == ENOTCONN);
+  SB_DLOG(INFO) << "Failed to send, errno = " << strerror(errno);
+>>>>>>> 48244d436bb (print errno name (#3138))
 
   EXPECT_TRUE(close(socket_fd) == 0);
 }
@@ -109,8 +116,17 @@ TEST(PosixSocketSendTest, RainyDaySendToClosedSocket) {
   void* thread_result;
   EXPECT_TRUE(pthread_join(send_thread, &thread_result) == 0);
 
+<<<<<<< HEAD
   // TODO: errno: EXPECT_TRUE(errno == ECONNRESET || errno == ENETRESET || errno
   // == EPIPE);
+=======
+  EXPECT_TRUE(errno == ECONNRESET || errno == ENETRESET || errno == EPIPE ||
+              errno == ENOTCONN ||     // errno on Windows
+              errno == EINPROGRESS ||  // errno on Evergreen
+              errno == ENETUNREACH     // errno on raspi
+  );
+  SB_DLOG(INFO) << "Failed to send, errno = " << strerror(errno);
+>>>>>>> 48244d436bb (print errno name (#3138))
 
   // Clean up the server socket.
   EXPECT_TRUE(close(server_socket_fd) == 0);
@@ -143,9 +159,15 @@ TEST(PosixSocketSendTest, RainyDaySendToSocketUntilBlocking) {
 
     if (result < 0) {
       // If we didn't get a socket, it should be pending.
+<<<<<<< HEAD
       // TODO: export errno
       // EXPECT_TRUE(errno == EINPROGRESS || errno == EAGAIN || errno ==
       // EWOULDBLOCK);
+=======
+      EXPECT_TRUE(errno == EINPROGRESS || errno == EAGAIN ||
+                  errno == EWOULDBLOCK);
+      SB_DLOG(INFO) << "Failed to send, errno = " << strerror(errno);
+>>>>>>> 48244d436bb (print errno name (#3138))
       break;
     }
 
@@ -191,10 +213,16 @@ TEST(PosixSocketSendTest, RainyDaySendToSocketConnectionReset) {
     result = send(client_socket_fd, buff, sizeof(buff), kSendFlags);
 
     if (result < 0) {
+<<<<<<< HEAD
       // TODO: errno:
       // EXPECT_TRUE(errno == ECONNRESET || errno == ENETRESET || errno ==
       // EPIPE);
       SB_DLOG(INFO) << "Failed to send, errno = " << errno;
+=======
+      EXPECT_TRUE(errno == ECONNRESET || errno == ENETRESET || errno == EPIPE ||
+                  errno == ECONNABORTED);
+      SB_DLOG(INFO) << "Failed to send, errno = " << strerror(errno);
+>>>>>>> 48244d436bb (print errno name (#3138))
       break;
     }
 
