@@ -411,6 +411,11 @@ SB_EXPORT SbSocketResolution* SbSocketResolve(const char* hostname,
 // |resolution|: The resolution to be freed.
 SB_EXPORT void SbSocketFreeResolution(SbSocketResolution* resolution);
 
+
+SB_EXPORT SbSocket SbSocketDbGetSbSocketFromFd(int socket_fd);
+SB_EXPORT int SbSocketDbGetFdFromSbSocket(SbSocket sb_socket);
+
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

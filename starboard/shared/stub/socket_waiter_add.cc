@@ -14,6 +14,16 @@
 
 #include "starboard/socket_waiter.h"
 
+#if SB_API_VERSION >= 16
+bool PosixSocketWaiterAdd(SbSocketWaiter waiter,
+                          int socket,
+                          void* context,
+                          SbSocketWaiterCallback callback,
+                          int interests,
+                          bool persistent) {
+  return false;
+}
+#else
 bool SbSocketWaiterAdd(SbSocketWaiter waiter,
                        SbSocket socket,
                        void* context,
@@ -22,3 +32,4 @@ bool SbSocketWaiterAdd(SbSocketWaiter waiter,
                        bool persistent) {
   return false;
 }
+#endif  // SB_API_VERSION <= 15

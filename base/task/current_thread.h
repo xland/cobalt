@@ -279,7 +279,7 @@ class BASE_EXPORT CurrentIOThread : public CurrentThread {
             WATCH_WRITE = base::MessagePumpIOStarboard::WATCH_WRITE,
             WATCH_READ_WRITE = base::MessagePumpIOStarboard::WATCH_READ_WRITE};
 
-  bool Watch(SbSocket socket,
+  bool Watch(int socket,
              bool persistent,
              int mode,
              SocketWatcher* controller,

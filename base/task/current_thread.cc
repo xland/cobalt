@@ -212,7 +212,7 @@ MessagePumpForIO* CurrentIOThread::GetMessagePumpForIO() const {
 #if !BUILDFLAG(IS_NACL)
 
 #if defined(STARBOARD)
-bool CurrentIOThread::Watch(SbSocket socket,
+bool CurrentIOThread::Watch(int socket,
                             bool persistent,
                             int mode,
                             SocketWatcher* controller,

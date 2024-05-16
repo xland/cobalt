@@ -15,6 +15,11 @@
 #ifndef BASE_MESSAGE_PUMP_IO_STARBOARD_H_
 #define BASE_MESSAGE_PUMP_IO_STARBOARD_H_
 
+
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <netinet/ip.h>
+
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_pump.h"
@@ -49,8 +54,8 @@ class BASE_EXPORT MessagePumpIOStarboard : public MessagePump {
    public:
     // These methods are called from MessageLoop::Run when a socket can be
     // interacted with without blocking.
-    virtual void OnSocketReadyToRead(SbSocket socket) {}
-    virtual void OnSocketReadyToWrite(SbSocket socket) {}
+    virtual void OnSocketReadyToRead(int socket) {}
+    virtual void OnSocketReadyToWrite(int socket) {}
 
    protected:
     virtual ~Watcher() {}
@@ -79,8 +84,8 @@ class BASE_EXPORT MessagePumpIOStarboard : public MessagePump {
     friend class MessagePumpIOStarboardTest;
 
     // Called by MessagePumpIOStarboard.
-    void Init(SbSocket socket, bool persistent);
-    SbSocket Release();
+    void Init(int socket, bool persistent);
+    int Release();
 
     int interests() const { return interests_; }
     void set_interests(int interests) { interests_ = interests; }
@@ -90,12 +95,12 @@ class BASE_EXPORT MessagePumpIOStarboard : public MessagePump {
 
     void set_watcher(Watcher* watcher) { watcher_ = watcher; }
 
-    void OnSocketReadyToRead(SbSocket socket, MessagePumpIOStarboard* pump);
-    void OnSocketReadyToWrite(SbSocket socket, MessagePumpIOStarboard* pump);
+    void OnSocketReadyToRead(int socket, MessagePumpIOStarboard* pump);
+    void OnSocketReadyToWrite(int socket, MessagePumpIOStarboard* pump);
 
     const Location created_from_location_;
     int interests_;
-    SbSocket socket_;
+    int socket_;
     bool persistent_;
     MessagePumpIOStarboard* pump_;
     Watcher* watcher_;
@@ -123,14 +128,14 @@ class BASE_EXPORT MessagePumpIOStarboard : public MessagePump {
   // If an error occurs while calling this method in a cumulative fashion, the
   // event previously attached to |controller| is aborted.  Returns true on
   // success.  Must be called on the same thread the message_pump is running on.
-  bool Watch(SbSocket socket,
+  bool Watch(int socket,
              bool persistent,
              int mode,
              SocketWatcher* controller,
              Watcher* delegate);
 
   // Stops watching the socket.
-  bool StopWatching(SbSocket socket);
+  bool StopWatching(int socket);
 
   void AddIOObserver(IOObserver* obs);
   void RemoveIOObserver(IOObserver* obs);
@@ -153,6 +158,11 @@ class BASE_EXPORT MessagePumpIOStarboard : public MessagePump {
                                          SbSocket socket,
                                          void* context,
                                          int ready_interests);
+
+  static void OnPosixSocketWaiterNotification(SbSocketWaiter waiter,
+                                              int socket,
+                                              void* context,
+                                              int ready_interests);
 
   bool should_quit() const { return !keep_running_; }
 

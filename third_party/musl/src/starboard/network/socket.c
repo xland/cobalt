@@ -484,6 +484,7 @@ int socket(int domain, int type, int protocol){
   memset(value, 0, sizeof(struct FileOrSocket));
   value->is_file = false;
   value->socket = SbSocketCreate(address_type, socket_protocol);
+
   if (!SbSocketIsValid(value->socket)){
     errno = SbSystemGetLastError();
     free(value);
@@ -754,7 +755,7 @@ int getsockname(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict 
   return result;
 }
 
-int setsockopt (int sockfd, int level, int optname, const void* optval,
+int setsockopt(int sockfd, int level, int optname, const void* optval,
                       socklen_t optlen){
   if (sockfd <= 0){
     errno = EBADF;
@@ -932,6 +933,29 @@ int getifaddrs(struct ifaddrs** ifap) {
   memset(ifa->ifa_addr, 0, sizeof(struct sockaddr));
   ConvertSocketAddressSbToPosix(&sbAddress, ifa->ifa_addr);
   return 0;
+}
+
+
+int socketDbGetFdFromSbSocket(SbSocket socket){
+  // TODO: implment this
+  //   maybe change the fd generation from sequencial to use the socket->socket_fd instead
+  return 1;
+}
+SbSocket socketDbGetSbSocket(int socket){
+  if (socket <= 0){
+    return NULL;
+  }
+  FileOrSocket *fileOrSock = NULL;
+  if (get(socket, false, &fileOrSock) != 0){
+    errno = EBADF;
+    return NULL;
+  }
+  if (fileOrSock == NULL || fileOrSock->is_file == true) {
+    errno = EBADF;
+    return NULL;
+  }
+
+  return fileOrSock->socket;
 }
 
 #endif  // SB_API_VERSION < 16

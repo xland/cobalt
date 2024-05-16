@@ -55,7 +55,7 @@ class Socket {
   bool IsConnectedAndIdle();
   bool IsPending();
 
-  SbSocketError GetLastError();
+  int GetLastError();
   void ClearLastError();
 
   int ReceiveFrom(char* out_data, int data_size, SbSocketAddress* out_source);
@@ -73,12 +73,20 @@ class Socket {
   bool SetTcpWindowScaling(bool value);
   bool JoinMulticastGroup(const SbSocketAddress* address);
 
+#if SB_API_VERSION >= 16
+  int socket();
+#else
   SbSocket socket();
+#endif
 
  private:
-  explicit Socket(SbSocket socket);
-
+#if SB_API_VERSION >= 16
+  int socket_;
+  explicit Socket(int socket);
+#else
   SbSocket socket_;
+  explicit Socket(SbSocket socket);
+#endif
 };
 
 }  // namespace starboard

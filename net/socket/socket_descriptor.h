@@ -18,7 +18,7 @@
 namespace net {
 
 #if defined(STARBOARD)
-typedef SbSocket SocketDescriptor;
+typedef int SocketDescriptor;
 #elif BUILDFLAG(IS_WIN)
 typedef UINT_PTR SocketDescriptor;
 const SocketDescriptor kInvalidSocket = (SocketDescriptor)(~0);

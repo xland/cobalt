@@ -13,13 +13,29 @@
 // limitations under the License.
 
 #include "starboard/socket_waiter.h"
-
+#include "starboard/socket.h"
 #include "starboard/shared/libevent/socket_waiter_internal.h"
 
 bool SbSocketWaiterRemove(SbSocketWaiter waiter, SbSocket socket) {
+#if SB_API_VERSION >= 16
+  // SbSocket APIs are deprecated in SB16 and beyond
+  return false;
+#else
+  if (!SbSocketWaiterIsValid(waiter)) {
+    return false;
+  }
+  return waiter->Remove(socket);
+#endif
+}
+
+#if SB_API_VERSION >= 16
+
+bool PosixSocketWaiterRemove(SbSocketWaiter waiter, int socket) {
   if (!SbSocketWaiterIsValid(waiter)) {
     return false;
   }
 
-  return waiter->Remove(socket);
+  return waiter->Remove(socket, waiter);
 }
+
+#endif  // SB_API_VERSION >= 16

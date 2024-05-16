@@ -16,6 +16,10 @@
 
 #include <memory>
 #include <utility>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 
 #include "base/functional/callback_helpers.h"
 #include "base/message_loop/message_pump_for_io.h"
@@ -33,7 +37,7 @@ TCPSocketStarboard::TCPSocketStarboard(
     NetLog* net_log,
     const NetLogSource& source)
     : socket_performance_watcher_(std::move(socket_performance_watcher)),
-      socket_(kSbSocketInvalid),
+      socket_(-1),
       socket_watcher_(FROM_HERE),
       family_(ADDRESS_FAMILY_UNSPECIFIED),
       logging_multiple_connect_attempts_(false),
@@ -48,22 +52,11 @@ TCPSocketStarboard::~TCPSocketStarboard() {
   Close();
 }
 
-int TCPSocketStarboard::Open(AddressFamily family) {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(!SbSocketIsValid(socket_));
-  socket_ = SbSocketCreate(ConvertAddressFamily(family), kSbSocketProtocolTcp);
-  if (!SbSocketIsValid(socket_)) {
-    return MapLastSystemError();
-  }
-
-  family_ = family;
-  return OK;
-}
 
 int TCPSocketStarboard::AdoptConnectedSocket(SocketDescriptor socket,
                                              const IPEndPoint& peer_address) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(!SbSocketIsValid(socket_));
+  DCHECK(socket_ < 0);
 
   SbSocketAddress storage;
   if (!peer_address.ToSbSocketAddress(&storage) &&
@@ -78,28 +71,37 @@ int TCPSocketStarboard::AdoptConnectedSocket(SocketDescriptor socket,
 
 int TCPSocketStarboard::AdoptUnconnectedSocket(SocketDescriptor socket) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(!SbSocketIsValid(socket_));
+  DCHECK(socket_ < 0);
 
   socket_ = socket;
   return OK;
 }
 
+int TCPSocketStarboard::Open(AddressFamily family) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(socket_ < 0);
+  socket_ = socket(family, SOCK_STREAM, kSbSocketProtocolTcp);
+  if (socket_ < 0) {
+    return errno;
+  }
+
+  family_ = family;
+  return OK;
+}
+
+
 int TCPSocketStarboard::Bind(const IPEndPoint& address) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(SbSocketIsValid(socket_));
+  DCHECK(socket_ >= 0);
   // Must have already called Open() on this socket with the same address
   // family as is being passed in here.
   DCHECK_EQ(family_, address.GetFamily());
 
-  SbSocketAddress storage;
-  if (!address.ToSbSocketAddress(&storage)) {
-    return ERR_ADDRESS_INVALID;
-  }
-
-  SbSocketError error = SbSocketBind(socket_, &storage);
-  if (error != kSbSocketOk) {
-    DLOG(ERROR) << "SbSocketBind() returned an error";
-    return MapLastSocketError(socket_);
+  struct sockaddr storage;
+  int error = bind(socket_, &storage, sizeof(struct sockaddr));
+  if (error != 0) {
+    DLOG(ERROR) << "Socket nind() returned an error";
+    return errno;
   }
 
   local_address_.reset(new IPEndPoint(address));
@@ -110,13 +112,13 @@ int TCPSocketStarboard::Bind(const IPEndPoint& address) {
 int TCPSocketStarboard::Listen(int backlog) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_GT(backlog, 0);
-  DCHECK(SbSocketIsValid(socket_));
+  DCHECK(socket_ >= 0);
   DCHECK(local_address_) << "Must have previously called Bind().";
 
-  SbSocketError error = SbSocketListen(socket_);
-  if (error != kSbSocketOk) {
-    DLOG(ERROR) << "SbSocketListen() returned an error";
-    int rv = MapLastSocketError(socket_);
+  int error = listen(socket_, backlog);
+  if (error != 0) {
+    DLOG(ERROR) << "Socket listen() returned an error";
+    int rv = errno;
     Close();
     return rv;
   }
@@ -143,7 +145,7 @@ int TCPSocketStarboard::Accept(std::unique_ptr<TCPSocketStarboard>* socket,
             socket_, true, base::MessagePumpIOStarboard::WATCH_READ,
             &socket_watcher_, this)) {
       DLOG(ERROR) << "WatchSocket failed on read";
-      return MapLastSocketError(socket_);
+      return errno;
     }
 
     accept_socket_ = socket;
@@ -155,62 +157,58 @@ int TCPSocketStarboard::Accept(std::unique_ptr<TCPSocketStarboard>* socket,
 }
 
 int TCPSocketStarboard::SetDefaultOptionsForServer() {
-  DCHECK(SbSocketIsValid(socket_));
-  if (!SbSocketSetReuseAddress(socket_, true)) {
-    return MapLastSocketError(socket_);
+  DCHECK(socket_ >= 0);
+  const int on = 1;
+  if (setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0) {
+    return errno;
   }
+
   return OK;
 }
 
 void TCPSocketStarboard::SetDefaultOptionsForClient() {
-  SbSocketSetTcpNoDelay(socket_, true);
-
+  bool on = true;
+  int result = 0;
   const int64_t kTCPKeepAliveDurationUsec = 45 * base::Time::kMicrosecondsPerSecond;
-  SbSocketSetTcpKeepAlive(socket_, true, kTCPKeepAliveDurationUsec);
 
-  SbSocketSetTcpWindowScaling(socket_, true);
+  // SbSocketSetTcpNoDelay
+  result |= setsockopt(socket_, IPPROTO_TCP, TCP_NODELAY,
+                      reinterpret_cast<const char*>(&on), sizeof(on));
+  // SbSocketSetTcpKeepAlive
+  result |= setsockopt(socket_, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof(on));
+  result |= setsockopt(socket_, SOL_TCP, TCP_KEEPIDLE, &kTCPKeepAliveDurationUsec,
+                       sizeof(kTCPKeepAliveDurationUsec));
+  result |= setsockopt(socket_, SOL_TCP, TCP_KEEPINTVL, &kTCPKeepAliveDurationUsec,
+                       sizeof(kTCPKeepAliveDurationUsec));
+  // SbSocketSetTcpWindowScaling - This API is not supported in standard POSIX.
 
+  // SbSocketSetReceiveBufferSize
   if (kSbNetworkReceiveBufferSize != 0) {
-    SbSocketSetReceiveBufferSize(socket_, kSbNetworkReceiveBufferSize);
+    result |= setsockopt(socket_, SOL_SOCKET, SO_RCVBUF, "SO_RCVBUF", kSbNetworkReceiveBufferSize);
   }
+  return result == 0;
 }
 
 int TCPSocketStarboard::AcceptInternal(
     std::unique_ptr<TCPSocketStarboard>* socket,
     IPEndPoint* address) {
-  SbSocket new_socket = SbSocketAccept(socket_);
-  if (!SbSocketIsValid(new_socket)) {
-    int net_error = MapLastSocketError(socket_);
+  int new_socket = accept(socket_, nullptr, nullptr);
+  if (new_socket < 0) {
+    int net_error = errno;
     if (net_error != ERR_IO_PENDING) {
       net_log_.EndEventWithNetErrorCode(NetLogEventType::TCP_ACCEPT, net_error);
     }
     return net_error;
   }
 
-  SbSocketAddress sb_address;
+  struct sockaddr saddr;
+  socklen_t length = sizeof(saddr);
   char unused_byte;
-  // We use ReceiveFrom to get peer address of the newly connected socket.
-  int received = SbSocketReceiveFrom(new_socket, &unused_byte, 0, &sb_address);
-  if (received != 0) {
-    int net_error = MapLastSocketError(new_socket);
-    if (net_error != OK && net_error != ERR_IO_PENDING) {
-      SbSocketDestroy(new_socket);
-      net_log_.EndEventWithNetErrorCode(NetLogEventType::TCP_ACCEPT, net_error);
-      return net_error;
-    } else {
-      // SbSocketReceiveFrom could return -1 and setting net_error to OK on
-      // some platforms, it is non-fatal. And we are not returning
-      // ERR_IO_PENDING to try again because 1. Some tests hang and time out
-      // waiting for Accept() to succeed and 2. Peer address is unused in
-      // most use cases. Chromium implementations get the address from accept()
-      // directly, but Starboard API is incapable of that.
-      DVLOG(1) << "Could not get peer address for the server socket.";
-    }
-  }
+  int result = getpeername(new_socket, &saddr, &length);
 
   IPEndPoint ip_end_point;
-  if (!ip_end_point.FromSbSocketAddress(&sb_address)) {
-    SbSocketDestroy(new_socket);
+  if (!ip_end_point.FromSockAddr(&saddr, length)) {
+    close(new_socket);
     int net_error = ERR_ADDRESS_INVALID;
     net_log_.EndEventWithNetErrorCode(NetLogEventType::TCP_ACCEPT, net_error);
     return net_error;
@@ -220,8 +218,8 @@ int TCPSocketStarboard::AcceptInternal(
       new TCPSocketStarboard(nullptr, net_log_.net_log(), net_log_.source()));
   int adopt_result = tcp_socket->AdoptConnectedSocket(new_socket, ip_end_point);
   if (adopt_result != OK) {
-    if (!SbSocketDestroy(new_socket)) {
-      DPLOG(ERROR) << "SbSocketDestroy";
+    if (!close(new_socket)) {
+      DPLOG(ERROR) << "Socket close()";
     }
     net_log_.EndEventWithNetErrorCode(NetLogEventType::TCP_ACCEPT,
                                       adopt_result);
@@ -237,15 +235,15 @@ int TCPSocketStarboard::AcceptInternal(
 
 void TCPSocketStarboard::Close() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  if (SbSocketIsValid(socket_)) {
+  if (socket_ >= 0) {
     StopWatchingAndCleanUp();
 
     net_log_.AddEvent(NetLogEventType::SOCKET_CLOSED);
 
-    if (!SbSocketDestroy(socket_)) {
-      DPLOG(ERROR) << "SbSocketDestroy";
+    if (!close(socket_)) {
+      DPLOG(ERROR) << "Socket close()";
     }
-    socket_ = kSbSocketInvalid;
+    socket_ = -1;
   }
 
   listening_ = false;
@@ -279,7 +277,7 @@ void TCPSocketStarboard::StopWatchingAndCleanUp() {
   peer_address_.reset();
 }
 
-void TCPSocketStarboard::OnSocketReadyToRead(SbSocket socket) {
+void TCPSocketStarboard::OnSocketReadyToRead(int socket) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   if (accept_pending()) {
@@ -295,7 +293,7 @@ void TCPSocketStarboard::OnSocketReadyToRead(SbSocket socket) {
   }
 }
 
-void TCPSocketStarboard::OnSocketReadyToWrite(SbSocket socket) {
+void TCPSocketStarboard::OnSocketReadyToWrite(int socket) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   if (listening_) {
@@ -313,7 +311,7 @@ void TCPSocketStarboard::OnSocketReadyToWrite(SbSocket socket) {
 int TCPSocketStarboard::Connect(const IPEndPoint& address,
                                 CompletionOnceCallback callback) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(SbSocketIsValid(socket_));
+  DCHECK(socket_ >= 0);
   DCHECK(!peer_address_);
   DCHECK(!connect_pending());
 
@@ -324,16 +322,16 @@ int TCPSocketStarboard::Connect(const IPEndPoint& address,
   net_log_.BeginEvent(NetLogEventType::TCP_CONNECT_ATTEMPT,
                       [&] { return CreateNetLogIPEndPointParams(&address); });
 
-  SbSocketAddress storage;
-  if (!address.ToSbSocketAddress(&storage)) {
+  struct sockaddr storage;
+  socklen_t length = sizeof(struct sockaddr);
+  if (!address.ToSockAddr(&storage, &length)) {
     return ERR_ADDRESS_INVALID;
   }
 
   peer_address_.reset(new IPEndPoint(address));
 
-  SbSocketError result = SbSocketConnect(socket_, &storage);
-
-  int rv = MapLastSocketError(socket_);
+  int result = connect(socket_, &storage, sizeof(struct sockaddr));
+  int rv = errno;
   if (rv != ERR_IO_PENDING) {
     return HandleConnectCompleted(rv);
   }
@@ -367,7 +365,7 @@ int TCPSocketStarboard::HandleConnectCompleted(int rv) {
 
 void TCPSocketStarboard::DidCompleteConnect() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  int rv = SbSocketIsConnected(socket_) ? OK : ERR_FAILED;
+  int rv = socket_ >= 0 ? OK : ERR_FAILED;
 
   waiting_connect_ = false;
   CompletionOnceCallback callback = std::move(write_callback_);
@@ -388,14 +386,18 @@ void TCPSocketStarboard::StartLoggingMultipleConnectAttempts(
 
 bool TCPSocketStarboard::IsConnected() const {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-
-  return SbSocketIsConnected(socket_);
+  return socket_ >= 0;
 }
 
 bool TCPSocketStarboard::IsConnectedAndIdle() const {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  return SbSocketIsConnectedAndIdle(socket_);
+  if (socket_ < 0)
+    return false;  // not connected
+  char c;
+  if (recv(socket_, &c, 1, MSG_PEEK) >= 0)
+    return false;  // not idle
+  return (errno == EAGAIN || errno == EWOULDBLOCK);
 }
 
 void TCPSocketStarboard::EndLoggingMultipleConnectAttempts(int net_error) {
@@ -425,7 +427,7 @@ int TCPSocketStarboard::Read(IOBuffer* buf,
                              int buf_len,
                              CompletionOnceCallback callback) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(SbSocketIsValid(socket_));
+  DCHECK(socket_ >= 0);
   DCHECK(!connect_pending());
   DCHECK_GT(buf_len, 0);
 
@@ -448,7 +450,7 @@ int TCPSocketStarboard::ReadIfReady(IOBuffer* buf,
                                     int buf_len,
                                     CompletionOnceCallback callback) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(SbSocketIsValid(socket_));
+  DCHECK(socket_ >= 0);
   DCHECK(read_if_ready_callback_.is_null());
 
   int rv = DoRead(buf, buf_len);
@@ -493,7 +495,8 @@ void TCPSocketStarboard::RetryRead(int rv) {
 }
 
 int TCPSocketStarboard::DoRead(IOBuffer* buf, int buf_len) {
-  int bytes_read = SbSocketReceiveFrom(socket_, buf->data(), buf_len, NULL);
+  const int kRecvFlag = 0;
+  int bytes_read = recv(socket_, buf->data(), buf_len, kRecvFlag);
 
   if (bytes_read >= 0) {
     net_log_.AddByteTransferEvent(NetLogEventType::SOCKET_BYTES_RECEIVED,
@@ -503,13 +506,11 @@ int TCPSocketStarboard::DoRead(IOBuffer* buf, int buf_len) {
     return bytes_read;
   } else {
     // If |bytes_read| < 0, some kind of error occurred.
-    SbSocketError starboard_error = SbSocketGetLastError(socket_);
-    int rv = MapSocketError(starboard_error);
+    int rv = errno;
     if (rv != ERR_IO_PENDING) {
-      NetLogSocketError(net_log_, NetLogEventType::SOCKET_READ_ERROR, rv,
-                        starboard_error);
       DLOG(ERROR) << __FUNCTION__ << "[" << this << "]: Error: " << rv;
     }
+
     return rv;
   }
 }
@@ -530,7 +531,7 @@ int TCPSocketStarboard::Write(
     CompletionOnceCallback callback,
     const NetworkTrafficAnnotationTag& traffic_annotation) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(SbSocketIsValid(socket_));
+  DCHECK(socket_ >= 0);
   DCHECK(!connect_pending());
   DCHECK(!write_pending());
   DCHECK_GT(buf_len, 0);
@@ -551,7 +552,13 @@ int TCPSocketStarboard::Write(
 }
 
 int TCPSocketStarboard::DoWrite(IOBuffer* buf, int buf_len) {
-  int bytes_sent = SbSocketSendTo(socket_, buf->data(), buf_len, NULL);
+#if defined(MSG_NOSIGNAL)
+  const int kSendFlags = MSG_NOSIGNAL;
+#else
+  const int kSendFlags = 0;
+#endif
+
+  int bytes_sent = send(socket_, buf->data(), buf_len, kSendFlags);
 
   if (bytes_sent >= 0) {
     net_log_.AddByteTransferEvent(NetLogEventType::SOCKET_BYTES_SENT,
@@ -559,10 +566,8 @@ int TCPSocketStarboard::DoWrite(IOBuffer* buf, int buf_len) {
 
     return bytes_sent;
   } else {
-    SbSocketError starboard_error = SbSocketGetLastError(socket_);
-    int rv = MapSocketError(starboard_error);
-    NetLogSocketError(net_log_, NetLogEventType::SOCKET_WRITE_ERROR, rv,
-                      starboard_error);
+    int rv = errno;
+
     if (rv != ERR_IO_PENDING) {
       DLOG(ERROR) << __FUNCTION__ << "[" << this << "]: Error: " << rv;
     }
@@ -599,7 +604,15 @@ bool TCPSocketStarboard::SetSendBufferSize(int32_t size) {
 
 bool TCPSocketStarboard::SetKeepAlive(bool enable, int delay) {
   int delay_second = delay * base::Time::kMicrosecondsPerSecond;
-  return SbSocketSetTcpKeepAlive(socket_, enable, delay_second);
+  int on = enable? 1:0;
+  int result = 0;
+  result |= setsockopt(socket_, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof(on));
+  result |= setsockopt(socket_, SOL_TCP, TCP_KEEPIDLE, &delay_second,
+                       sizeof(delay_second));
+
+  result |= setsockopt(socket_, SOL_TCP, TCP_KEEPINTVL, &delay_second,
+                       sizeof(delay_second));
+  return result == 0;
 }
 
 bool TCPSocketStarboard::SetNoDelay(bool no_delay) {
@@ -621,13 +634,12 @@ int TCPSocketStarboard::GetLocalAddress(IPEndPoint* address) const {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(address);
 
-  SbSocketAddress sb_address;
-  if (!SbSocketGetLocalAddress(socket_, &sb_address)) {
-    SbSocketError starboard_error = SbSocketGetLastError(socket_);
-    return MapSocketError(starboard_error);
+  struct sockaddr saddr = {0};
+  socklen_t socklen;
+  if (0 != getsockname(socket_, &saddr, &socklen)){
+    return errno;
   }
-
-  if (!address->FromSbSocketAddress(&sb_address)) {
+  if (!address->FromSockAddr(&saddr, socklen)) {
     return ERR_ADDRESS_INVALID;
   }
 
@@ -649,7 +661,7 @@ void TCPSocketStarboard::DetachFromThread() {
 
 SocketDescriptor TCPSocketStarboard::ReleaseSocketDescriptorForTesting() {
   SocketDescriptor socket_descriptor = socket_;
-  socket_ = kSbSocketInvalid;
+  socket_ = -1;
   Close();
   return socket_descriptor;
 }
@@ -659,8 +671,10 @@ SocketDescriptor TCPSocketStarboard::SocketDescriptorForTesting() const {
 }
 
 void TCPSocketStarboard::ApplySocketTag(const SocketTag& tag) {
-  if (SbSocketIsValid(socket_) && tag != tag_) {
-    tag.Apply(socket_);
+  if (socket_ >= 0) {
+    if (tag != tag_) {
+      tag.Apply(socket_);
+    }
   }
   tag_ = tag;
 }

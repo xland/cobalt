@@ -149,7 +149,6 @@ int getservbyname_r(const char *, const char *, struct servent *, char *, size_t
 #define NI_MAXSERV 32
 #endif
 
-
 #ifdef __cplusplus
 }
 #endif

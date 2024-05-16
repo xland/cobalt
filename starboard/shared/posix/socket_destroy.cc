@@ -24,6 +24,9 @@
 #include "starboard/socket_waiter.h"
 
 bool SbSocketDestroy(SbSocket socket) {
+#if SB_API_VERSION >= 16
+  // SbSocket APIs are deprecated in SB16 and above
+#else
   if (!SbSocketIsValid(socket)) {
     errno = EBADF;
     return false;
@@ -40,4 +43,6 @@ bool SbSocketDestroy(SbSocket socket) {
 
   delete socket;
   return result;
+
+#endif  // SB_API_VERSION >= 16
 }

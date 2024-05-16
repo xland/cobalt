@@ -38,24 +38,4 @@ Error MapSystemError(logging::SystemErrorCode error) {
   return ERR_FAILED;
 }
 
-Error MapSocketError(SbSocketError error) {
-  if (error != kSbSocketOk)
-    DVLOG(2) << "Error " << error;
-
-  // TODO: Define standard Starboard error codes.
-  switch (error) {
-    case kSbSocketOk:
-      return OK;
-    case kSbSocketPending:
-      return ERR_IO_PENDING;
-    case kSbSocketErrorConnectionReset:
-      return ERR_CONNECTION_RESET;
-    case kSbSocketErrorFailed:
-      return ERR_FAILED;
-    default:
-      NOTREACHED() << "Unrecognized error: " << error;
-      return ERR_FAILED;
-  }
-}
-
 }  // namespace net

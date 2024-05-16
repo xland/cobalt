@@ -79,22 +79,25 @@ class NET_EXPORT UDPSocketStarboardSender
  public:
   explicit UDPSocketStarboardSender();
 
-  SendResult SendBuffers(const SbSocket& socket,
+  SendResult SendBuffers(const int socket,
                          DatagramBuffers buffers,
-                         SbSocketAddress address);
+                         struct sockaddr* paddress,
+                         socklen_t len);
 
  protected:
   friend class base::RefCountedThreadSafe<UDPSocketStarboardSender>;
 
   virtual ~UDPSocketStarboardSender();
-  virtual int Send(const SbSocket& socket,
+
+  virtual int Send(const int socket,
                    const char* buf,
                    size_t len,
-                   SbSocketAddress address) const;
-
-  SendResult InternalSendBuffers(const SbSocket& socket,
+                   struct sockaddr* paddress,
+                   socklen_t length) const;
+  SendResult InternalSendBuffers(const int socket,
                                  DatagramBuffers buffers,
-                                 SbSocketAddress address) const;
+                                 struct sockaddr* paddress,
+                                 socklen_t len) const;
 
  private:
   UDPSocketStarboardSender(const UDPSocketStarboardSender&) = delete;
@@ -317,14 +320,14 @@ class NET_EXPORT UDPSocketStarboard
   // Enables experimental optimization. This method should be called
   // before the socket is used to read data for the first time.
   void enable_experimental_recv_optimization() {
-    DCHECK(SbSocketIsValid(socket_));
+    DCHECK(socket_ >= 0);
     experimental_recv_optimization_enabled_ = true;
   };
 
   // Takes ownership of `socket`, which should be a socket descriptor opened
   // with the specified address family. The socket should only be created but
   // not bound or connected to an address.
-  int AdoptOpenedSocket(AddressFamily address_family, const SbSocket& socket);
+  int AdoptOpenedSocket(AddressFamily address_family, const int socket);
 
  protected:
   // Watcher for WriteAsync paths.
@@ -334,9 +337,8 @@ class NET_EXPORT UDPSocketStarboard
         : socket_(socket), watching_(false) {}
 
     // MessagePumpIOStarboard::Watcher methods
-
-    void OnSocketReadyToRead(SbSocket socket){};
-    void OnSocketReadyToWrite(SbSocket socket);
+    void OnSocketReadyToRead(int socket){};
+    void OnSocketReadyToWrite(int socket);
 
     void set_watching(bool watching) { watching_ = watching; }
 
@@ -372,8 +374,8 @@ class NET_EXPORT UDPSocketStarboard
 
  private:
   // MessagePumpIOStarboard::Watcher implementation.
-  void OnSocketReadyToRead(SbSocket socket) override;
-  void OnSocketReadyToWrite(SbSocket socket) override;
+  void OnSocketReadyToRead(int socket) override;
+  void OnSocketReadyToWrite(int socket) override;
 
   int InternalWriteAsync(CompletionOnceCallback callback,
                          const NetworkTrafficAnnotationTag& traffic_annotation);
@@ -419,7 +421,8 @@ class NET_EXPORT UDPSocketStarboard
   int ResetLastAsyncResult();
   int ResetWrittenBytes();
 
-  SbSocket socket_;
+  int socket_;
+
   bool is_connected_ = false;
 
   SbSocketAddressType address_type_;
