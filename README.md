@@ -179,6 +179,7 @@ All source locations are specified relative to `src/` (this directory).
   See the below reference port setup guides for more details:
 
   * [Linux](cobalt/site/docs/development/setup-linux.md)
+  * [Windows](cobalt/site/docs/development/setup-windows.md)
   * [Raspi](cobalt/site/docs/development/setup-raspi.md)
   * [Android](cobalt/site/docs/development/setup-android.md)
   * [Docker](cobalt/site/docs/development/setup-docker.md)
